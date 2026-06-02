@@ -225,18 +225,51 @@ def load_dicom(file_bytes: bytes) -> tuple[Image.Image, dict]:
         pil_img = Image.fromarray(pixel_array, mode="L")
 
         meta = {
-            "Patient ID":       getattr(ds, "PatientID",       "N/A"),
-            "Modality":         getattr(ds, "Modality",         "N/A"),
-            "Series Desc":      getattr(ds, "SeriesDescription","N/A"),
+            "Patient ID":       getattr(ds, "PatientID",        "N/A"),
+            "Modality":         getattr(ds, "Modality",          "N/A"),
+            "Series Desc":      getattr(ds, "SeriesDescription", "N/A"),
+            "Sequence":         getattr(ds, "SequenceName",      "N/A"),
             "Rows × Cols":      f"{getattr(ds, 'Rows', '?')} × {getattr(ds, 'Columns', '?')}",
             "Slice Thickness":  str(getattr(ds, "SliceThickness", "N/A")),
-            "TE (ms)":          str(getattr(ds, "EchoTime",      "N/A")),
-            "TR (ms)":          str(getattr(ds, "RepetitionTime","N/A")),
+            "TE (ms)":          str(getattr(ds, "EchoTime",       "N/A")),
+            "TR (ms)":          str(getattr(ds, "RepetitionTime", "N/A")),
         }
     finally:
         os.unlink(tmp_path)
 
     return pil_img, meta
+
+
+
+# ─── Sequence weighting auto-detection (DICOM only) ──────────────────────────
+def detect_sequence_weighting(dicom_meta: dict) -> tuple:
+    """
+    Attempt to infer T1 or T2 weighting from DICOM metadata tags.
+    Returns (guess, evidence):
+      guess    — 'T1', 'T2', or None if uncertain
+      evidence — human-readable explanation of what drove the decision
+    """
+    candidates = [
+        dicom_meta.get("Series Desc", ""),
+        dicom_meta.get("Sequence",    ""),
+    ]
+    combined = " ".join(str(c) for c in candidates).upper()
+
+    # Check T2 markers first — some T2 strings also contain digits that could
+    # false-match a naive T1 check (e.g. "T2_FLAIR" → don't match "1" in "FLAIR")
+    t2_patterns = ["T2", "FLAIR", "T2W", "T2_", "_T2", "TSE", "FSE", "HASTE", "STIR"]
+    t1_patterns = ["T1", "T1W", "T1_", "_T1", "MPRAGE", "BRAVO", "SPGR",
+                   "TFL", "VIBE", "FLASH", "IR_FSPGR", "3DT1"]
+
+    for pat in t2_patterns:
+        if pat in combined:
+            return "T2", f"Series description contains \"{pat}\""
+
+    for pat in t1_patterns:
+        if pat in combined:
+            return "T1", f"Series description contains \"{pat}\""
+
+    return None, "No recognisable sequence keyword found in DICOM header"
 
 
 # ─── Navbar ───────────────────────────────────────────────────────────────────
@@ -311,10 +344,15 @@ with st.sidebar:
 
     # ── Sequence weighting / model selection ───────────────────────────────────────
     st.markdown("#### 🏷️ Sequence Weighting")
+
+    # Default index: use DICOM auto-detect hint if available, else 0 (T1)
+    _hint = st.session_state.get("dicom_weighting_hint", None)
+    _default_idx = 1 if _hint == "T2" else 0
+
     mri_type = st.radio(
         label="Sequence Weighting",
         options=["T1", "T2"],
-        index=0,
+        index=_default_idx,
         horizontal=True,
         help=(
             "**T1-weighted** — good for anatomy, white/grey matter contrast.\n\n"
@@ -322,6 +360,14 @@ with st.sidebar:
         ),
         label_visibility="collapsed",
     )
+
+    # Show auto-detect notice when a DICOM hint is active
+    if _hint:
+        _evidence = st.session_state.get("dicom_weighting_evidence", "")
+        if _hint == mri_type:
+            st.caption(f"🔍 Auto-detected from DICOM header — {_evidence}. Confirm or change above.")
+        else:
+            st.caption(f"⚠️ DICOM suggested **{_hint}** ({_evidence}) but you selected **{mri_type}**.")
 
     st.markdown(
         f"<span style='font-size:.76rem; color:#64748b; font-family:\"DM Mono\",monospace;'>"
@@ -427,10 +473,17 @@ with col_left:
                 with st.spinner("Converting DICOM to PNG…"):
                     try:
                         image, dicom_meta = load_dicom(uploaded.read())
+                        # Auto-detect sequence weighting from DICOM header
+                        _guess, _evidence = detect_sequence_weighting(dicom_meta)
+                        st.session_state["dicom_weighting_hint"]     = _guess
+                        st.session_state["dicom_weighting_evidence"] = _evidence
                     except Exception as e:
                         st.error(f"DICOM read failed: `{e}`")
         else:
             image = Image.open(uploaded).convert("L")
+            # Clear any DICOM hint from a previous upload
+            st.session_state.pop("dicom_weighting_hint",     None)
+            st.session_state.pop("dicom_weighting_evidence", None)
 
     if image is not None:
         st.markdown('<div class="card">', unsafe_allow_html=True)
