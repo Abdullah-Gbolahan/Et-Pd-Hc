@@ -61,7 +61,7 @@ def download_from_gdrive(file_id: str, save_path: Path, progress_bar=None) -> Pa
     url = f"https://drive.google.com/uc?id={file_id}"
 
     # gdown writes directly to save_path
-    gdown.download(url, str(save_path), quiet=False, fuzzy=True)
+    gdown.download(url, str(save_path), quiet=False)
 
     # Validate what we got
     if not _is_valid_checkpoint(save_path):
