@@ -88,7 +88,7 @@ section[data-testid="stSidebar"] * { color: var(--text) !important; }
     font-family:'DM Mono',monospace; margin-bottom:.8rem;
 }
 
-/* MRI type badge */
+/* Sequence weighting badge */
 .mri-badge {
     display:inline-block; padding:4px 14px; border-radius:999px;
     font-size:.78rem; font-weight:700; letter-spacing:.08em;
@@ -309,10 +309,10 @@ with st.sidebar:
     st.markdown("### ⚙️ Configuration")
     st.markdown("---")
 
-    # ── MRI type / model selection ────────────────────────────────────────────
-    st.markdown("#### 🏷️ MRI Type")
+    # ── Sequence weighting / model selection ───────────────────────────────────────
+    st.markdown("#### 🏷️ Sequence Weighting")
     mri_type = st.radio(
-        label="MRI Type",
+        label="Sequence Weighting",
         options=["T1", "T2"],
         index=0,
         horizontal=True,
@@ -325,7 +325,7 @@ with st.sidebar:
 
     st.markdown(
         f"<span style='font-size:.76rem; color:#64748b; font-family:\"DM Mono\",monospace;'>"
-        f"Active model: </span>"
+        f"Active weighting: </span>"
         f"<span class='mri-badge badge-{mri_type.lower()}'>{mri_type}</span>",
         unsafe_allow_html=True,
     )
@@ -351,7 +351,7 @@ with st.sidebar:
     st.markdown("### 📋 Model Info")
     st.markdown(f"""
     <div style='font-size:.78rem; color:#64748b; line-height:1.9; font-family:"DM Mono",monospace;'>
-    MRI Type &nbsp;&nbsp; {mri_type}-weighted<br>
+    Sequence Weighting &nbsp; {mri_type}-weighted<br>
     Backbone &nbsp;&nbsp; {model_variant}<br>
     Input &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 224 × 224 px<br>
     Classes &nbsp;&nbsp;&nbsp; ET · PD · Healthy<br>
@@ -384,7 +384,7 @@ def get_model(variant: str, mri_type: str):
     return load_model(str(model_path), variant=variant)
 
 
-with st.spinner(f"Loading {mri_type} model…"):
+with st.spinner(f"Loading {mri_type}-weighted model…"):
     try:
         model, meta = get_model(model_variant, mri_type)
         model_loaded = True
@@ -494,7 +494,7 @@ with col_right:
 
         st.markdown(f"""
         <div class='card'>
-          <div class='card-title'>Prediction · {mri_type}-weighted model</div>
+          <div class='card-title'>Prediction · {mri_type}-weighted sequence</div>
           <span class='result-badge badge-{badge_cls}'>{pred_label}</span>
           <div style='font-size:1rem; font-weight:600; margin-top:.6rem;'>
               {CLASS_FULL[pred_label]}
