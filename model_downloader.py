@@ -32,9 +32,8 @@ def _is_valid_checkpoint(path: Path) -> bool:
         return False
     with open(path, "rb") as f:
         header = f.read(4)
-    # PyTorch checkpoints are pickles → first byte is 0x80
-    # HTML error pages start with '<' (0x3C)
-    return header[:1] == b"\x80"
+    # Reject obvious HTML error pages; accept pickle (0x80) and ZIP/PyTorch 2.x (PK = 0x50 0x4B)
+    return header[:1] not in (b"<", b"{")
 
 
 def _get_file_id(mri_type: str) -> str | None:
@@ -43,13 +42,28 @@ def _get_file_id(mri_type: str) -> str | None:
         return st.secrets[secret_key]
     except (KeyError, FileNotFoundError):
         pass
-    # Legacy fallback for T1
     if mri_type == "T1":
         try:
             return st.secrets["GDRIVE_FILE_ID"]
         except (KeyError, FileNotFoundError):
             pass
     return None
+
+
+def _diagnose(save_path: Path) -> str:
+    """Return a human-readable diagnosis of what was downloaded."""
+    if not save_path.exists():
+        return "File was not created at all."
+    size = save_path.stat().st_size
+    with open(save_path, "rb") as f:
+        header = f.read(256)
+    header_hex    = header[:8].hex()
+    header_text   = header[:256].decode("utf-8", errors="replace").replace("\n", " ")[:120]
+    return (
+        f"Size: {size:,} bytes | "
+        f"First 8 bytes (hex): `{header_hex}` | "
+        f"First 120 chars: `{header_text}`"
+    )
 
 
 def download_from_gdrive(file_id: str, save_path: Path, progress_bar=None) -> Path:
@@ -59,18 +73,18 @@ def download_from_gdrive(file_id: str, save_path: Path, progress_bar=None) -> Pa
     save_path.parent.mkdir(parents=True, exist_ok=True)
 
     url = f"https://drive.google.com/uc?id={file_id}"
+    gdown.download(url, output=str(save_path), quiet=False)
 
-    # gdown writes directly to save_path
-    gdown.download(url, str(save_path), quiet=False)
-
-    # Validate what we got
     if not _is_valid_checkpoint(save_path):
-        # Remove the bad file so next boot retries
+        diagnosis = _diagnose(save_path)
         save_path.unlink(missing_ok=True)
         raise RuntimeError(
-            "Downloaded file does not look like a valid PyTorch checkpoint. "
-            "Make sure the Google Drive file is shared with 'Anyone with the link' "
-            "and that the FILE_ID is correct."
+            f"Downloaded file is not a valid PyTorch checkpoint.\n\n"
+            f"**Diagnosis:** {diagnosis}\n\n"
+            "This usually means:\n"
+            "1. The file is not shared as **Anyone with the link** on Google Drive\n"
+            "2. The FILE_ID in your secrets is wrong\n"
+            "3. Google Drive download quota has been exceeded for this file"
         )
 
     if progress_bar:
@@ -88,11 +102,9 @@ def ensure_model_downloaded(mri_type: str = "T1") -> Path:
     filename  = MODEL_FILENAMES.get(mri_type, MODEL_FILENAMES["T1"])
     save_path = MODEL_CACHE_DIR / filename
 
-    # Happy path — already have a valid file
     if _is_valid_checkpoint(save_path):
         return save_path
 
-    # Remove stale / corrupt file if present
     if save_path.exists():
         save_path.unlink()
 
@@ -102,8 +114,7 @@ def ensure_model_downloaded(mri_type: str = "T1") -> Path:
         st.error(
             f"**Missing `{secret_key}` in secrets.**\n\n"
             f"Add it to `.streamlit/secrets.toml`:\n"
-            f"```toml\n{secret_key} = \"your_file_id_here\"\n```\n\n"
-            "See README for how to get the file ID from your Drive share link."
+            f"```toml\n{secret_key} = \"your_file_id_here\"\n```"
         )
         st.stop()
 
@@ -114,9 +125,5 @@ def ensure_model_downloaded(mri_type: str = "T1") -> Path:
         path = download_from_gdrive(file_id, save_path, progress_bar=bar)
         return path
     except Exception as e:
-        st.error(
-            f"**Download failed:** `{e}`\n\n"
-            "Check that your Drive file is shared with **Anyone with the link** "
-            "and that the FILE_ID in your secrets is correct."
-        )
+        st.error(str(e))
         st.stop()
