@@ -186,7 +186,7 @@ def load_model(checkpoint_path: str, variant: str = "swin_b") -> SwinClassifier:
     if not os.path.exists(checkpoint_path):
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
 
-    raw = torch.load(checkpoint_path, map_location="cpu")
+    raw = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
 
     if isinstance(raw, dict):
         if "state_dict" in raw:
